@@ -1,26 +1,89 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+  }
+
+  body {
+    /* Using standard CSS for body since @apply might behave differently in v4 or requires theme config */
+    /* But @apply should work if configured. Let's use direct properties to be safe or use theme() */
+    background-color: #020617;
+    /* slate-950 */
+    color: #f8fafc;
+    /* slate-50 */
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  /* Light mode overrides */
+  .light body,
+  html.light body {
+    background-color: #f8fafc;
+    color: #0f172a;
+  }
+
+  html.light .bg-slate-950 {
+    background-color: #f1f5f9 !important;
+  }
+
+  html.light .bg-slate-900 {
+    background-color: #ffffff !important;
+  }
+
+  html.light .bg-slate-900\/30,
+  html.light .bg-slate-900\/40,
+  html.light .bg-slate-900\/50 {
+    background-color: rgba(255, 255, 255, 0.8) !important;
+  }
+
+  html.light .bg-slate-800,
+  html.light .bg-slate-800\/50 {
+    background-color: #e2e8f0 !important;
+  }
+
+  html.light .text-slate-200 {
+    color: #1e293b !important;
+  }
+
+  html.light .text-slate-300 {
+    color: #334155 !important;
+  }
+
+  html.light .text-slate-400 {
+    color: #475569 !important;
+  }
+
+  html.light .text-white {
+    color: #0f172a !important;
+  }
+
+  html.light .border-slate-800,
+  html.light .border-slate-800\/50 {
+    border-color: #cbd5e1 !important;
+  }
+
+  html.light .border-slate-700 {
+    border-color: #94a3b8 !important;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Custom utilities if needed */
+@utility text-balance {
+  text-wrap: balance;
+}
+
+/* Custom animation for settings icon */
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(180deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 0.3s ease-out;
 }
