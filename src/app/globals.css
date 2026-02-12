@@ -1,4 +1,6 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 @layer base {
   :root {
@@ -7,8 +9,6 @@
   }
 
   body {
-    /* Using standard CSS for body since @apply might behave differently in v4 or requires theme config */
-    /* But @apply should work if configured. Let's use direct properties to be safe or use theme() */
     background-color: #020617;
     /* slate-950 */
     color: #f8fafc;
@@ -68,9 +68,11 @@
   }
 }
 
-/* Custom utilities if needed */
-@utility text-balance {
-  text-wrap: balance;
+/* Custom utilities */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
 }
 
 /* Custom animation for settings icon */
