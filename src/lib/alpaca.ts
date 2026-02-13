@@ -1,8 +1,24 @@
-import { supabaseAdmin } from "./supabase-admin";
+import { createClient } from "@supabase/supabase-js";
 
 const ALPACA_API_URL = process.env.ALPACA_API_URL || "https://paper-api.alpaca.markets"; // Default to paper for safety
 
 export async function getAlpacaToken(userId: string): Promise<string | null> {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseServiceKey) {
+        // During build time or if env vars are missing, return null safely
+        console.warn("Missing Supabase credentials in getAlpacaToken");
+        return null;
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: {
+            autoRefreshToken: false,
+            persistSession: false
+        }
+    });
+
     const { data, error } = await supabaseAdmin
         .from('alpaca_tokens')
         .select('access_token')
