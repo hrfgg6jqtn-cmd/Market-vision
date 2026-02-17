@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Crosshair, BarChart2, AlertOctagon } from 'lucide-react';
+import { Crosshair, BarChart2, AlertOctagon, Radio } from 'lucide-react';
 import { ChartManager } from '@/lib/ChartManager';
 
 interface CustomChartProps {
@@ -22,6 +22,9 @@ export const CustomChart: React.FC<CustomChartProps> = ({ ticker, tradeSetup, is
     const [error, setError] = useState<string | null>(null);
     const [tradeType, setTradeType] = useState<'dollars' | 'shares'>('dollars');
     const [tradeAmount, setTradeAmount] = useState<string>("100");
+    const [livePrice, setLivePrice] = useState<number | null>(null);
+    const [marketState, setMarketState] = useState<string>("");
+    const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
 
     // Initialize Chart Manager
     useEffect(() => {
@@ -54,6 +57,7 @@ export const CustomChart: React.FC<CustomChartProps> = ({ ticker, tradeSetup, is
             }
             setIsLoading(true);
             setError(null);
+            setLivePrice(null);
             try {
                 const response = await fetch('/api/history', {
                     method: 'POST',
@@ -72,6 +76,7 @@ export const CustomChart: React.FC<CustomChartProps> = ({ ticker, tradeSetup, is
                     // Initialize lastCandleRef with the latest available candle
                     if (data.length > 0) {
                         lastCandleRef.current = { ...data[data.length - 1] };
+                        setLivePrice(data[data.length - 1].close);
                     }
                 }
 
@@ -89,48 +94,50 @@ export const CustomChart: React.FC<CustomChartProps> = ({ ticker, tradeSetup, is
         lastCandleRef.current = null;
     }, [ticker, timeframe]);
 
-    // Real-time Polling
+    // Real-time Polling — ALWAYS runs regardless of broker connection or timeframe
     useEffect(() => {
-        if (!isConnected && timeframe !== '1y' && timeframe !== '6mo') return; // Only poll if connected or viewing relevant timeframes, or always polling? Let's strictly poll for now to make it feel alive.
-        // Actually, let's always poll for "live" feel even if disconnected (using market data API)
+        let isMounted = true;
 
-        const interval = setInterval(async () => {
+        const pollPrice = async () => {
             try {
-                // Fetch latest price
                 const response = await fetch(`/api/market/latest?ticker=${ticker}`);
                 const data = await response.json();
 
-                if (data.success && data.price && lastCandleRef.current && chartManagerRef.current) {
+                if (!isMounted) return;
+
+                if (data.success && data.price) {
                     const currentPrice = data.price;
-                    const timestamp = Math.floor(data.timestamp / 1000) as any; // Lightweight charts uses seconds for generic types
+                    setLivePrice(currentPrice);
+                    setMarketState(data.marketState || "");
+                    setLastUpdateTime(new Date());
 
-                    // Check if we need a new candle (e.g., if we are on daily timeframe, seeing if day changed? 
-                    // or for simplicity, we just UPDATE the Close of the current candle for "daily" view)
+                    // Only update chart if we have a last candle and chart manager
+                    if (lastCandleRef.current && chartManagerRef.current) {
+                        const updatedCandle = {
+                            ...lastCandleRef.current,
+                            close: currentPrice,
+                            high: Math.max(lastCandleRef.current.high, currentPrice),
+                            low: Math.min(lastCandleRef.current.low, currentPrice),
+                        };
 
-                    // For simply "moving" the price, updates the Close of the last candle.
-                    // Also update High/Low/Open logic if needed.
-
-                    const updatedCandle = {
-                        ...lastCandleRef.current,
-                        close: currentPrice,
-                        // Update High/Low if price exceeds boundaries
-                        high: Math.max(lastCandleRef.current.high, currentPrice),
-                        low: Math.min(lastCandleRef.current.low, currentPrice),
-                    };
-
-                    // If we strictly just update the last candle timestamp to "now" it might mess up "Daily" chart logic unless we are carefully managing time.
-                    // For a daily chart, the timestamp should remain the current day's timestamp.
-
-                    lastCandleRef.current = updatedCandle;
-                    chartManagerRef.current.updateLastCandle(updatedCandle);
+                        lastCandleRef.current = updatedCandle;
+                        chartManagerRef.current.updateLastCandle(updatedCandle);
+                    }
                 }
             } catch (e) {
                 console.error("Polling error:", e);
             }
-        }, 5000); // Poll every 5 seconds
+        };
 
-        return () => clearInterval(interval);
-    }, [ticker, timeframe, isConnected]);
+        // Run immediately on mount, then every 3 seconds
+        pollPrice();
+        const interval = setInterval(pollPrice, 3000);
+
+        return () => {
+            isMounted = false;
+            clearInterval(interval);
+        };
+    }, [ticker]);
 
     // Update Trade Setup Lines
     useEffect(() => {
@@ -234,6 +241,29 @@ export const CustomChart: React.FC<CustomChartProps> = ({ ticker, tradeSetup, is
                     </>
                 )}
             </div>
+
+            {/* Live Price Indicator */}
+            {livePrice !== null && (
+                <div className="absolute top-4 right-4 z-20 flex items-center gap-2 bg-slate-950/80 p-1.5 px-3 rounded-lg border border-slate-800 backdrop-blur-md">
+                    <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    </span>
+                    <span className="text-xs font-mono font-bold text-white">${livePrice.toFixed(2)}</span>
+                    {marketState && (
+                        <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${marketState === 'REGULAR' ? 'bg-emerald-500/20 text-emerald-400' :
+                                marketState === 'PRE' ? 'bg-amber-500/20 text-amber-400' :
+                                    marketState === 'POST' || marketState === 'POSTPOST' ? 'bg-blue-500/20 text-blue-400' :
+                                        'bg-slate-500/20 text-slate-400'
+                            }`}>
+                            {marketState === 'REGULAR' ? 'LIVE' :
+                                marketState === 'PRE' ? 'PRE' :
+                                    marketState === 'POST' || marketState === 'POSTPOST' ? 'AFTER' :
+                                        'CLOSED'}
+                        </span>
+                    )}
+                </div>
+            )}
 
             {/* Error Overlay */}
             {error && (
