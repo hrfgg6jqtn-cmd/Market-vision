@@ -114,7 +114,9 @@ async function analyzeWithAI(headlines: string[]): Promise<{ sentiment: number, 
     }
 }
 
-async function analyzeTicker(ticker: string, sources: string[] = ['patterns', 'news', 'social']): Promise<ScanResult | null> {
+import { getLatestQuote } from "@/lib/alpaca";
+
+async function analyzeTicker(ticker: string, userId: string | null, sources: string[] = ['patterns', 'news', 'social']): Promise<ScanResult | null> {
     try {
         const end = new Date();
         const start = new Date();
@@ -130,36 +132,53 @@ async function analyzeTicker(ticker: string, sources: string[] = ['patterns', 'n
         if (!quotes || quotes.length < 50) return null;
 
         // Fetch Real-time Quote to ensure we have the very latest data (intraday)
-        try {
-            const quote = await api.quote(ticker);
-            const livePrice = quote.regularMarketPrice;
+        let livePrice = null;
 
-            if (livePrice) {
-                const lastQuote = quotes[quotes.length - 1];
-                const lastDate = new Date(lastQuote.date);
-                const today = new Date();
-
-                const isSameDay = lastDate.getDate() === today.getDate() &&
-                    lastDate.getMonth() === today.getMonth() &&
-                    lastDate.getFullYear() === today.getFullYear();
-
-                if (isSameDay) {
-                    lastQuote.close = livePrice;
-                    lastQuote.high = Math.max(lastQuote.high, livePrice);
-                    lastQuote.low = Math.min(lastQuote.low, livePrice);
-                } else {
-                    quotes.push({
-                        date: today,
-                        open: livePrice,
-                        high: livePrice,
-                        low: livePrice,
-                        close: livePrice,
-                        volume: 0
-                    });
+        // 1. Try Alpaca if user is connected
+        if (userId) {
+            try {
+                const alpacaQuote = await getLatestQuote(userId, ticker);
+                if (alpacaQuote) {
+                    livePrice = alpacaQuote.ap || alpacaQuote.bp; // Use Ask or Bid
                 }
+            } catch (e) {
+                // Ignore alpaca error, fallback to yahoo
             }
-        } catch (e) {
-            console.log(`Failed to fetch live quote for ${ticker}, using historical only.`);
+        }
+
+        // 2. Fallback to Yahoo if no Alpaca data
+        if (!livePrice) {
+            try {
+                const quote = await api.quote(ticker);
+                livePrice = quote.regularMarketPrice;
+            } catch (e) {
+                console.log(`Failed to fetch live quote for ${ticker}, using historical only.`);
+            }
+        }
+
+        if (livePrice) {
+            const lastQuote = quotes[quotes.length - 1];
+            const lastDate = new Date(lastQuote.date);
+            const today = new Date();
+
+            const isSameDay =
+                lastDate.toLocaleDateString('en-US', { timeZone: 'America/New_York' }) ===
+                today.toLocaleDateString('en-US', { timeZone: 'America/New_York' });
+
+            if (isSameDay) {
+                lastQuote.close = livePrice;
+                lastQuote.high = Math.max(lastQuote.high, livePrice);
+                lastQuote.low = Math.min(lastQuote.low, livePrice);
+            } else {
+                quotes.push({
+                    date: today,
+                    open: livePrice,
+                    high: livePrice,
+                    low: livePrice,
+                    close: livePrice,
+                    volume: 0
+                });
+            }
         }
 
         const closes = quotes.map((q: any) => q.close).filter((n: any) => typeof n === 'number');
@@ -435,7 +454,7 @@ export async function POST(req: NextRequest) {
         for (let i = 0; i < selectedTickers.length; i += chunkSize) {
             const chunk = selectedTickers.slice(i, i + chunkSize);
             const chunkResults = await Promise.all(
-                chunk.map(ticker => analyzeTicker(ticker, validSources))
+                chunk.map(ticker => analyzeTicker(ticker, userId, validSources))
             );
 
             chunkResults.forEach(result => {

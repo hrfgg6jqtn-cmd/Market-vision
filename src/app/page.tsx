@@ -1,288 +1,245 @@
-"use client";
+import React from 'react';
+import Link from 'next/link';
+import { ArrowRight, Activity, Zap, Shield, TrendingUp } from 'lucide-react';
 
-import React, { useState, useMemo } from "react";
-import { ChartUpload } from "@/components/ChartUpload";
-import { AnalysisDisplay } from "@/components/AnalysisDisplay";
-import { CustomChart } from "@/components/CustomChart";
-import { MarketEducation } from "@/components/MarketEducation";
-import { PatternScanner } from "@/components/PatternScanner";
-import { SystemInfoModal } from "@/components/SystemInfoModal";
-import { DisclaimerModal } from "@/components/DisclaimerModal";
-import { BrokerModal } from "@/components/BrokerModal";
-import { SettingsDropdown } from "@/components/SettingsDropdown";
-import { SearchBar } from "@/components/SearchBar";
-import { UserButton } from "@clerk/nextjs";
-import { Zap, AlertTriangle, TestTube, LayoutDashboard, TrendingUp, Wallet, Globe, Info } from "lucide-react";
-import { getMockAnalysis, MOCK_SCENARIOS } from "@/lib/mockData";
+export default function LandingPage() {
+    return (
+        <div className="min-h-screen bg-[#0A0A0A] text-white selection:bg-emerald-500/30 font-sans overflow-x-hidden">
 
-export default function Home() {
-  const [analysis, setAnalysis] = useState<string>("");
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isDemoMode, setIsDemoMode] = useState(false);
-  const [marketType, setMarketType] = useState<'stocks' | 'forex' | 'crypto'>('stocks');
-  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
-  const [showInfo, setShowInfo] = useState(false);
-  const [showBroker, setShowBroker] = useState(false);
-  const [isBrokerConnected, setIsBrokerConnected] = useState(false);
-
-  // Check connection status on load
-  React.useEffect(() => {
-    const checkConnection = async () => {
-      try {
-        const res = await fetch('/api/alpaca/status');
-        const data = await res.json();
-        setIsBrokerConnected(data.connected);
-      } catch (e) {
-        console.error("Failed to check broker status", e);
-      }
-    };
-
-    // Check if redirect just happened
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('connected') === 'true') {
-      setIsBrokerConnected(true);
-      setShowBroker(true); // Open modal to show success state
-      // Clean URL
-      window.history.replaceState({}, '', '/');
-    } else {
-      checkConnection();
-    }
-  }, []);
-
-  const chartSymbol = useMemo(() => {
-    // 1. Priority: User selected an alert
-    if (selectedTicker) {
-      if (selectedTicker.includes("-USD")) {
-        return `BINANCE:${selectedTicker.replace("-USD", "USDT")}`;
-      }
-      return `NASDAQ:${selectedTicker}`;
-    }
-
-    // 2. Fallback: Market type default
-    switch (marketType) {
-      case 'stocks': return "AMEX:SPY";
-      case 'forex': return "FX:EURUSD";
-      case 'crypto': return "BINANCE:BTCUSDT";
-    }
-  }, [marketType, selectedTicker]);
-
-  interface Alert {
-    ticker: string;
-    pattern: string;
-    signal: "BUY" | "SELL";
-    confidence: number;
-    price: number;
-    stopLoss: number;
-    takeProfit: number;
-    reason?: string;
-  }
-
-  const [tradeSetup, setTradeSetup] = useState<Alert | null>(null);
-
-  const handleSelectAlert = (alert: any) => {
-    setSelectedTicker(alert.ticker);
-    setTradeSetup(alert);
-
-    const scenario = MOCK_SCENARIOS[alert.ticker];
-    if (scenario) {
-      setAnalysis(scenario.analysis);
-    } else {
-      setAnalysis(`
-# 🚨 TRADING SETUP: ${alert.ticker}
-**Pattern**: ${alert.pattern} | **Signal**: ${alert.signal} | **Confidence**: ${alert.confidence}%
-
-## 🎯 EXECUTION PLAN
-- **Entry**: $${alert.price?.toFixed(2)}
-- **Stop Loss**: $${alert.stopLoss?.toFixed(2)} (${alert.signal === 'BUY' ? 'Below support' : 'Above resistance'})
-- **Take Profit**: $${alert.takeProfit?.toFixed(2)} (Target 1:2 Risk/Reward)
-
-## ⚠️ RISK CHECK
-This is an algorithmic setup based on technical indicators. 
-Ensure volume confirms the move before entering.
-        `);
-    }
-
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleUpload = async (file: File) => {
-    setIsAnalyzing(true);
-    setAnalysis("");
-    setError(null);
-    setSelectedTicker(null);
-
-    if (isDemoMode) {
-      setTimeout(() => {
-        setAnalysis(getMockAnalysis(marketType));
-        setIsAnalyzing(false);
-      }, 2000);
-      return;
-    }
-
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = async () => {
-        const base64Image = reader.result;
-        const response = await fetch("/api/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: base64Image, type: marketType }),
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Analysis failed");
-        setAnalysis(data.analysis);
-      };
-      reader.onerror = () => { throw new Error("Failed to read file"); };
-    } catch (err: any) {
-      setError(err.message || "Something went wrong");
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
-  return (
-    <main className="min-h-screen bg-slate-950 text-slate-200 selection:bg-emerald-500/30 font-sans pb-20">
-      <div className="fixed inset-0 z-0 pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-emerald-900/10 blur-3xl opacity-50"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-blue-900/10 blur-3xl opacity-50"></div>
-      </div>
-
-      <SystemInfoModal isOpen={showInfo} onClose={() => setShowInfo(false)} />
-      <BrokerModal isOpen={showBroker} onClose={() => setShowBroker(false)} isConnected={isBrokerConnected} />
-      <DisclaimerModal />
-
-      <div className="relative z-10 container mx-auto px-4 py-8 max-w-7xl">
-        <header className="relative z-50 flex flex-col md:flex-row items-center justify-between mb-12 gap-6 bg-slate-900/40 p-6 rounded-2xl border border-slate-800/50 backdrop-blur-sm">
-          <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-emerald-500 to-cyan-500 p-2 rounded-lg">
-              <Zap className="text-white fill-white" size={24} />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">Van<span className="text-emerald-400">tix</span></h1>
-              <p className="text-xs text-slate-400 uppercase tracking-widest font-mono">AI Technical Analyst</p>
-            </div>
-          </div>
-
-          <div className="flex-1 flex justify-center max-w-sm mx-auto w-full">
-            <SearchBar onSearch={(t) => {
-              setSelectedTicker(t);
-              setTradeSetup(null); // Clear setup when manually searching
-              // Reset analysis too maybe?
-              setAnalysis("");
-            }} />
-          </div>
-
-          <div className="flex items-center gap-2 bg-slate-950/50 p-1.5 rounded-xl border border-slate-800">
-            <button onClick={() => { setMarketType('stocks'); setSelectedTicker(null); }} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${marketType === 'stocks' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-              <LayoutDashboard size={16} /> Stocks
-            </button>
-            <button onClick={() => { setMarketType('forex'); setSelectedTicker(null); }} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${marketType === 'forex' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-              <Globe size={16} /> Forex
-            </button>
-            <button onClick={() => { setMarketType('crypto'); setSelectedTicker(null); }} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${marketType === 'crypto' ? 'bg-orange-500 text-white shadow-lg shadow-orange-900/20' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}>
-              <Wallet size={16} /> Crypto
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button onClick={() => setShowInfo(true)} className="p-2.5 rounded-lg bg-slate-800/50 border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-white transition-all shadow-lg hover:shadow-emerald-900/20" title="System Info">
-              <Info size={18} />
-            </button>
-            <button onClick={() => setShowBroker(true)} className={`px-3 py-2 rounded-lg border text-xs font-bold transition-all ${isBrokerConnected ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-500 hover:bg-emerald-500/20" : "bg-amber-500/10 border-amber-500/50 text-amber-500 hover:bg-amber-500/20"}`}>
-              {isBrokerConnected ? "BROKER CONNECTED" : "CONNECT BROKER"}
-            </button>
-            <button onClick={() => setIsDemoMode(!isDemoMode)} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all duration-300 border ${isDemoMode ? "bg-amber-500/10 border-amber-500/50 text-amber-500 hover:bg-amber-500/20 shadow-[0_0_15px_rgba(245,158,11,0.2)]" : "bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-300"}`}>
-              <TestTube size={16} /> {isDemoMode ? "DEMO ACTIVE" : "ENABLE DEMO"}
-            </button>
-            <SettingsDropdown />
-          </div>
-        </header>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-12 xl:col-span-6 space-y-8">
-            <section className="bg-slate-900/30 border border-slate-800/50 rounded-2xl p-1">
-              <ChartUpload onUpload={handleUpload} isAnalyzing={isAnalyzing} />
-            </section>
-            {error && (
-              <div className="p-4 bg-red-950/20 border border-red-900/50 rounded-xl text-red-200 flex items-center gap-3 animate-in shake">
-                <AlertTriangle className="text-red-500 shrink-0" /> <p>{error}</p>
-              </div>
-            )}
-            <AnalysisDisplay analysis={analysis} />
-          </div>
-
-          <div className="lg:col-span-12 xl:col-span-6 space-y-8">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between px-2">
-                <h2 className="text-xl font-bold text-slate-200 flex items-center gap-2">
-                  <TrendingUp className="text-emerald-500" /> Live Market Data
-                </h2>
-                <div className="flex items-center gap-4">
-                  {tradeSetup && (chartSymbol.includes(tradeSetup.ticker.replace("-USD", "")) || tradeSetup.ticker === chartSymbol) && (
-                    <div className="flex gap-4 text-xs font-mono bg-slate-900/80 p-1.5 rounded-lg border border-slate-700/50">
-                      <span className="text-red-400 font-bold">SL: ${tradeSetup.stopLoss?.toFixed(2)}</span>
-                      <span className="text-emerald-400 font-bold">TP: ${tradeSetup.takeProfit?.toFixed(2)}</span>
+            {/* Navigation */}
+            <nav className="fixed top-0 w-full z-50 border-b border-white/5 bg-[#0A0A0A]/80 backdrop-blur-xl">
+                <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                        <TrendingUp className="text-emerald-500" size={24} />
+                        <span className="text-lg font-bold tracking-tight">MarketVision</span>
                     </div>
-                  )}
-                  <span className="text-xs font-mono text-slate-500">{chartSymbol}</span>
+
+                    <div className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-400">
+                        <a href="#features" className="hover:text-white transition-colors">Features</a>
+                        <a href="#pricing" className="hover:text-white transition-colors">Pricing</a>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                        <Link href="/sign-in" className="text-sm font-medium text-slate-300 hover:text-white transition-colors">
+                            Log in
+                        </Link>
+                        <Link href="/sign-up" className="text-sm font-medium bg-white text-black px-4 py-2 rounded-full hover:bg-slate-200 transition-colors flex items-center gap-2">
+                            Sign up <ArrowRight size={16} />
+                        </Link>
+                    </div>
                 </div>
-              </div>
+            </nav>
 
-              {tradeSetup && (chartSymbol.includes(tradeSetup.ticker.replace("-USD", "")) || tradeSetup.ticker === chartSymbol) && (
-                <div className="bg-slate-900/60 border border-slate-700/50 p-4 rounded-xl mb-4 flex justify-between items-center backdrop-blur-sm animate-in slide-in-from-top-4">
-                  <div>
-                    <div className="text-slate-400 text-xs uppercase tracking-wider font-bold mb-1">Active Setup</div>
-                    <div className="text-2xl font-bold text-white flex items-center gap-3">
-                      {tradeSetup.ticker}
-                      <span className={`text-sm px-2 py-1 rounded ${tradeSetup.signal === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                        {tradeSetup.signal}
-                      </span>
+            {/* Hero Section */}
+            <main className="relative pt-32 pb-20 sm:pt-40 sm:pb-24 overflow-hidden">
+                {/* Subtle Gradient Background */}
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[500px] opacity-20 pointer-events-none">
+                    <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/30 to-blue-500/30 blur-[100px] rounded-full mix-blend-screen"></div>
+                </div>
+
+                <div className="relative max-w-7xl mx-auto px-6 text-center z-10">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs font-medium text-slate-300 mb-8 backdrop-blur-sm">
+                        <span className="flex h-2 w-2 relative">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                        MarketVision AI Platform 2.0 is Live
                     </div>
-                    <div className="text-slate-400 text-sm mt-1">{tradeSetup.pattern}</div>
-                  </div>
-                  <div className="flex flex-col gap-4 text-right">
-                    <div className="flex gap-8 justify-end">
-                      <div>
-                        <div className="text-slate-500 text-xs mb-1">Entry</div>
-                        <div className="text-white font-mono text-lg">${tradeSetup.price?.toFixed(2)}</div>
-                      </div>
-                      <div>
-                        <div className="text-slate-500 text-xs mb-1">Stop Loss</div>
-                        <div className="text-red-400 font-mono text-lg">${tradeSetup.stopLoss?.toFixed(2)}</div>
-                      </div>
-                      <div>
-                        <div className="text-slate-500 text-xs mb-1">Take Profit</div>
-                        <div className="text-emerald-400 font-mono text-lg">${tradeSetup.takeProfit?.toFixed(2)}</div>
-                      </div>
+
+                    <h1 className="text-5xl sm:text-7xl font-bold tracking-tighter mb-8 max-w-4xl mx-auto leading-[1.1]">
+                        Trade the future with <br />
+                        <span className="text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-500">
+                            zero-latency intelligence.
+                        </span>
+                    </h1>
+
+                    <p className="text-lg sm:text-xl text-slate-400 mb-10 max-w-2xl mx-auto leading-relaxed">
+                        Institutional-grade charting synced directly to the exchange. AI-powered pattern recognition that scans the globe in milliseconds. Built for the modern trader.
+                    </p>
+
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                        <Link href="/sign-up" className="w-full sm:w-auto px-8 py-4 bg-white text-black rounded-full font-bold hover:scale-105 transition-transform flex items-center justify-center gap-2">
+                            Start Trading Now <ArrowRight size={18} />
+                        </Link>
+                        <Link href="#features" className="w-full sm:w-auto px-8 py-4 bg-white/5 text-white border border-white/10 rounded-full font-bold hover:bg-white/10 transition-colors">
+                            Explore Features
+                        </Link>
                     </div>
-                    {tradeSetup.reason && (
-                      <div className="bg-slate-950/50 p-3 rounded-lg border border-slate-800 text-left max-w-md">
-                        <div className="text-[10px] text-slate-500 uppercase font-bold mb-1 flex items-center gap-1">
-                          <Info size={12} /> Strategy Rationale
+                </div>
+
+                {/* Dashboard Image Placeholder - Linear Style */}
+                <div className="mt-20 max-w-6xl mx-auto px-6 relative z-20 perspective-1000">
+                    <div className="rounded-2xl border border-white/10 bg-slate-900/50 backdrop-blur-sm p-2 shadow-2xl flex items-center justify-center aspect-[16/9] w-full transform rotate-x-12 scale-95 hover:rotate-x-0 hover:scale-100 transition-all duration-700 ease-out group overflow-hidden">
+
+                        {/* Glow Effect behind image */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#0A0A0A] via-transparent to-transparent z-10 pointer-events-none"></div>
+                        <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500/20 to-blue-500/20 blur-xl opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+
+                        {/* Replace this div with an actual <img> tag when user uploads the photo */}
+                        <div className="relative z-0 w-full h-full rounded-xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center text-slate-500 overflow-hidden">
+                            <Activity size={48} className="mb-4 opacity-50" />
+                            <p className="text-sm font-medium tracking-widest uppercase">Drop Platform Screenshot Here</p>
                         </div>
-                        <p className="text-xs text-slate-300 leading-relaxed">
-                          {tradeSetup.reason}
-                        </p>
-                      </div>
-                    )}
-                  </div>
+
+                    </div>
                 </div>
-              )}
+            </main>
 
-              <CustomChart
-                ticker={chartSymbol}
-                tradeSetup={tradeSetup && (chartSymbol.includes(tradeSetup.ticker.replace("-USD", "")) || tradeSetup.ticker === chartSymbol) ? tradeSetup : null}
-                isConnected={isBrokerConnected}
-              />
-            </div>
+            {/* Features Grid */}
+            <section id="features" className="py-32 bg-[#0A0A0A] border-t border-white/5 relative z-30">
+                <div className="max-w-7xl mx-auto px-6">
+                    <div className="text-center mb-20">
+                        <h2 className="text-3xl sm:text-5xl font-bold tracking-tight mb-4">Built for speed and precision.</h2>
+                        <p className="text-slate-400 text-lg">Everything you need to execute the perfect setup.</p>
+                    </div>
 
-            <PatternScanner onSelectAlert={handleSelectAlert} />
-            <MarketEducation marketType={marketType} />
-          </div>
+                    <div className="grid md:grid-cols-3 gap-6">
+                        {/* Feature 1 */}
+                        <div className="p-8 rounded-2xl bg-white/[0.02] border border-white/5 hover:border-emerald-500/30 transition-colors">
+                            <div className="w-12 h-12 bg-emerald-500/10 rounded-lg flex items-center justify-center mb-6 text-emerald-500">
+                                <Zap size={24} />
+                            </div>
+                            <h3 className="text-xl font-bold mb-3">Live Streaming Sync</h3>
+                            <p className="text-slate-400 text-sm leading-relaxed">
+                                Connect directly to the exchange via WebSocket. Zero-latency tick updates directly into your charting module.
+                            </p>
+                        </div>
+
+                        {/* Feature 2 */}
+                        <div className="p-8 rounded-2xl bg-white/[0.02] border border-white/5 hover:border-blue-500/30 transition-colors">
+                            <div className="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center mb-6 text-blue-500">
+                                <Activity size={24} />
+                            </div>
+                            <h3 className="text-xl font-bold mb-3">AI Pattern Scanner</h3>
+                            <p className="text-slate-400 text-sm leading-relaxed">
+                                Our bespoke AI model continuously scans 60+ global assets, identifying historical setups and breaking news signals instantaneously.
+                            </p>
+                        </div>
+
+                        {/* Feature 3 */}
+                        <div className="p-8 rounded-2xl bg-white/[0.02] border border-white/5 hover:border-purple-500/30 transition-colors">
+                            <div className="w-12 h-12 bg-purple-500/10 rounded-lg flex items-center justify-center mb-6 text-purple-500">
+                                <Shield size={24} />
+                            </div>
+                            <h3 className="text-xl font-bold mb-3">Institutional Grade</h3>
+                            <p className="text-slate-400 text-sm leading-relaxed">
+                                Trade directly from the chart leveraging Alpaca's robust API framework. We handle the complexity, you handle the entry.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Pricing Section */}
+            <section id="pricing" className="py-32 bg-[#0A0A0A] relative z-30">
+                <div className="max-w-7xl mx-auto px-6">
+                    <div className="text-center mb-20">
+                        <h2 className="text-3xl sm:text-5xl font-bold tracking-tight mb-4">Pricing for everyone.</h2>
+                        <p className="text-slate-400 text-lg">Start for free, upgrade when you need more power.</p>
+                    </div>
+
+                    <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+                        {/* Free Tier */}
+                        <div className="p-8 rounded-3xl bg-white/[0.02] border border-white/5 flex flex-col">
+                            <h3 className="text-xl font-medium mb-2">Basic</h3>
+                            <div className="mb-6">
+                                <span className="text-4xl font-bold">$0</span>
+                                <span className="text-slate-500">/mo</span>
+                            </div>
+                            <ul className="space-y-4 mb-8 text-sm text-slate-300 flex-1">
+                                <li className="flex items-center gap-3">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                    Delayed EOD Pricing
+                                </li>
+                                <li className="flex items-center gap-3">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                    Basic Charting Tools
+                                </li>
+                                <li className="flex items-center gap-3">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                    Limited AI Scans / day
+                                </li>
+                            </ul>
+                            <Link href="/sign-up" className="w-full py-3 rounded-full border border-white/10 hover:bg-white/5 transition-colors text-center font-medium text-sm">
+                                Start Free
+                            </Link>
+                        </div>
+
+                        {/* Pro Tier (Highlighted) */}
+                        <div className="p-8 rounded-3xl bg-gradient-to-b from-white/5 to-transparent border border-emerald-500/30 flex flex-col relative transform md:-translate-y-4">
+                            <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-3 py-1 bg-emerald-500 text-black text-xs font-bold rounded-full">
+                                MOST POPULAR
+                            </div>
+                            <h3 className="text-xl font-medium mb-2 text-emerald-400">Pro</h3>
+                            <div className="mb-6">
+                                <span className="text-4xl font-bold">$49</span>
+                                <span className="text-slate-500">/mo</span>
+                            </div>
+                            <ul className="space-y-4 mb-8 text-sm text-slate-300 flex-1">
+                                <li className="flex items-center gap-3 text-white">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                    Real-time WebSocket Data
+                                </li>
+                                <li className="flex items-center gap-3 text-white">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                    Unlimited AI Pattern Scans
+                                </li>
+                                <li className="flex items-center gap-3 text-white">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                    1-Click Broker Integration
+                                </li>
+                                <li className="flex items-center gap-3 text-white">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                    News Sentiment Analysis
+                                </li>
+                            </ul>
+                            <Link href="/sign-up" className="w-full py-3 rounded-full bg-emerald-500 text-black hover:bg-emerald-400 transition-colors text-center font-bold text-sm">
+                                Go Pro
+                            </Link>
+                        </div>
+
+                        {/* Enterprise */}
+                        <div className="p-8 rounded-3xl bg-white/[0.02] border border-white/5 flex flex-col">
+                            <h3 className="text-xl font-medium mb-2">Institutional</h3>
+                            <div className="mb-6">
+                                <span className="text-4xl font-bold">$299</span>
+                                <span className="text-slate-500">/mo</span>
+                            </div>
+                            <ul className="space-y-4 mb-8 text-sm text-slate-300 flex-1">
+                                <li className="flex items-center gap-3">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                    Bespoke API Access
+                                </li>
+                                <li className="flex items-center gap-3">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                    Dedicated Account Manager
+                                </li>
+                                <li className="flex items-center gap-3">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                                    Custom AI Model Tuning
+                                </li>
+                            </ul>
+                            <Link href="/sign-up" className="w-full py-3 rounded-full border border-white/10 hover:bg-white/5 transition-colors text-center font-medium text-sm">
+                                Contact Sales
+                            </Link>
+                        </div>
+
+                    </div>
+                </div>
+            </section>
+
+            {/* Footer */}
+            <footer className="border-t border-white/5 py-12 text-center text-slate-500 text-sm relative z-30 bg-[#0A0A0A]">
+                <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between">
+                    <div className="flex items-center gap-2 mb-4 md:mb-0">
+                        <TrendingUp size={16} /> MarketVision
+                    </div>
+                    <div className="flex gap-6">
+                        <Link href="/terms" className="hover:text-white transition-colors">Terms of Service</Link>
+                        <Link href="/privacy" className="hover:text-white transition-colors">Privacy Policy</Link>
+                    </div>
+                </div>
+            </footer>
         </div>
-      </div>
-    </main>
-  );
+    );
 }

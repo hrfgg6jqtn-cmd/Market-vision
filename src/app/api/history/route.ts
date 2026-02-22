@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import yf2 from "yahoo-finance2";
 import { auth } from "@clerk/nextjs/server";
+import { getLatestQuote } from "@/lib/alpaca";
 
 // Fix for Yahoo Finance instantiation issue
 const yahooFinance = yf2 as any;
@@ -21,8 +22,6 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Ticker is required" }, { status: 400 });
         }
 
-        // Map "1y", "1mo" etc to Yahoo Finance query options
-        // Defaulting to a safe range
         const queryOptions: any = {
             period1: new Date(Date.now() - (365 * 24 * 60 * 60 * 1000)), // 1 year ago default
             period2: new Date(), // Now
@@ -33,14 +32,13 @@ export async function POST(req: NextRequest) {
         if (range === '3mo') queryOptions.period1 = new Date(Date.now() - (90 * 24 * 60 * 60 * 1000));
         if (range === '6mo') queryOptions.period1 = new Date(Date.now() - (180 * 24 * 60 * 60 * 1000));
 
-        // Clean ticker for Yahoo (handle -USD pairs vs standard)
         let queryTicker = ticker;
         if (ticker.includes("BINANCE:")) queryTicker = ticker.replace("BINANCE:", "").replace("USDT", "-USD");
         if (ticker.includes("NASDAQ:")) queryTicker = ticker.replace("NASDAQ:", "");
         if (ticker.includes("AMEX:")) queryTicker = ticker.replace("AMEX:", "");
         if (ticker.includes("FX:")) queryTicker = ticker.replace("FX:", "").replace("/", ""); // EURUSD format
 
-        console.log(`[History API] Fetching: ${queryTicker} with range: ${range}`);
+        console.log(`[History API] Fetching: ${queryTicker} with range: ${range}, interval: ${interval}`);
 
         const result = await api.historical(queryTicker, queryOptions);
 
@@ -50,16 +48,44 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "No data found" }, { status: 404 });
         }
 
+        // Fetch Real-time Quote to ensure the last candle is perfectly in sync
+        let livePrice = null;
+        try {
+            const alpacaQuote = await getLatestQuote(userId, queryTicker);
+            if (alpacaQuote) livePrice = alpacaQuote.ap || alpacaQuote.bp;
+        } catch (e) { }
+
+        if (!livePrice) {
+            try {
+                const quote = await api.quote(queryTicker);
+                livePrice = quote.regularMarketPrice;
+                if (quote.marketState === "PRE" && quote.preMarketPrice) {
+                    livePrice = quote.preMarketPrice;
+                } else if ((quote.marketState === "POST" || quote.marketState === "POSTPOST") && quote.postMarketPrice) {
+                    livePrice = quote.postMarketPrice;
+                } else if (quote.marketState === "CLOSED" && quote.postMarketPrice) {
+                    livePrice = quote.postMarketPrice;
+                }
+            } catch (e) { }
+        }
+
+        if (livePrice && result.length > 0) {
+            const lastQuote = result[result.length - 1];
+            lastQuote.close = livePrice;
+            lastQuote.high = Math.max(lastQuote.high, livePrice);
+            lastQuote.low = Math.min(lastQuote.low, livePrice);
+        }
+
         // Format for Lightweight Charts provided structure
-        // expects: { time: '2018-12-22', open: 75.16, high: 82.84, low: 36.16, close: 45.72 }
         const formattedData = result.map((quote: any) => ({
-            time: quote.date.toISOString().split('T')[0], // YYYY-MM-DD
+            time: interval === "1d"
+                ? quote.date.toISOString().split('T')[0]
+                : Math.floor(quote.date.getTime() / 1000), // lightweight charts needs UNIX timestamp for intraday
             open: quote.open,
             high: quote.high,
             low: quote.low,
             close: quote.close,
-            // value: quote.close, // for line charts if needed
-        })).filter((d: any) => d.open !== undefined && d.close !== undefined); // filter invalid candles
+        })).filter((d: any) => d.open !== undefined && d.close !== undefined);
 
         return NextResponse.json({
             success: true,

@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import useSWR from 'swr';
+import { useAlpacaWebSocket } from '@/hooks/useAlpacaWebSocket';
 import { Crosshair, BarChart2, AlertOctagon, Radio } from 'lucide-react';
 import { ChartManager } from '@/lib/ChartManager';
 
@@ -59,10 +61,11 @@ export const CustomChart: React.FC<CustomChartProps> = ({ ticker, tradeSetup, is
             setError(null);
             setLivePrice(null);
             try {
+                const interval = timeframe === "1mo" ? "60m" : "1d";
                 const response = await fetch('/api/history', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ticker, range: timeframe })
+                    body: JSON.stringify({ ticker, range: timeframe, interval })
                 });
                 const result = await response.json();
 
@@ -94,50 +97,75 @@ export const CustomChart: React.FC<CustomChartProps> = ({ ticker, tradeSetup, is
         lastCandleRef.current = null;
     }, [ticker, timeframe]);
 
-    // Real-time Polling — ALWAYS runs regardless of broker connection or timeframe
+    const { price: wsPrice, status: wsStatus } = useAlpacaWebSocket(ticker, !!isConnected);
+
+    // SWR fallback polling (runs only if websocket isn't connected)
+    const fetcher = (url: string) => fetch(url).then(res => res.json());
+    const { data: fallbackData } = useSWR(
+        (!isConnected || wsStatus !== 'connected') ? `/api/market/latest?ticker=${ticker}` : null,
+        fetcher,
+        { refreshInterval: 3000 }
+    );
+
+    // Real-time Sync Engine: Merges WebSocket ticks or SWR cache into the chart
     useEffect(() => {
-        let isMounted = true;
+        let currentPrice = null;
+        let currentMarketState = "";
 
-        const pollPrice = async () => {
-            try {
-                const response = await fetch(`/api/market/latest?ticker=${ticker}`);
-                const data = await response.json();
+        if (wsStatus === 'connected' && wsPrice !== null) {
+            currentPrice = wsPrice;
+            currentMarketState = "REGULAR"; // WebSocket streams indicate active market
+        } else if (fallbackData?.success && fallbackData?.price) {
+            currentPrice = fallbackData.price;
+            currentMarketState = fallbackData.marketState || "";
+        }
 
-                if (!isMounted) return;
+        if (currentPrice !== null) {
+            setLivePrice(currentPrice);
+            setMarketState(currentMarketState);
+            setLastUpdateTime(new Date());
 
-                if (data.success && data.price) {
-                    const currentPrice = data.price;
-                    setLivePrice(currentPrice);
-                    setMarketState(data.marketState || "");
-                    setLastUpdateTime(new Date());
+            // Instantly update the chart candle, rolling over to a new one if the time boundary passed
+            if (lastCandleRef.current && chartManagerRef.current) {
+                let tickTime: string | number;
 
-                    // Only update chart if we have a last candle and chart manager
-                    if (lastCandleRef.current && chartManagerRef.current) {
-                        const updatedCandle = {
-                            ...lastCandleRef.current,
-                            close: currentPrice,
-                            high: Math.max(lastCandleRef.current.high, currentPrice),
-                            low: Math.min(lastCandleRef.current.low, currentPrice),
-                        };
-
-                        lastCandleRef.current = updatedCandle;
-                        chartManagerRef.current.updateLastCandle(updatedCandle);
-                    }
+                if (timeframe === "1mo") {
+                    // hourly (Unix timestamp in seconds for the start of the current hour)
+                    const d = new Date();
+                    d.setMinutes(0, 0, 0);
+                    tickTime = Math.floor(d.getTime() / 1000);
+                } else {
+                    // daily (YYYY-MM-DD in New York timezone)
+                    const d = new Date();
+                    const year = d.toLocaleDateString('en-US', { year: 'numeric', timeZone: 'America/New_York' });
+                    const month = d.toLocaleDateString('en-US', { month: '2-digit', timeZone: 'America/New_York' });
+                    const day = d.toLocaleDateString('en-US', { day: '2-digit', timeZone: 'America/New_York' });
+                    tickTime = `${year}-${month}-${day}`;
                 }
-            } catch (e) {
-                console.error("Polling error:", e);
+
+                if (tickTime > lastCandleRef.current.time) {
+                    // Seamlessly append a brand new candle
+                    lastCandleRef.current = {
+                        time: tickTime,
+                        open: currentPrice,
+                        high: currentPrice,
+                        low: currentPrice,
+                        close: currentPrice
+                    };
+                } else {
+                    // Update existing candle
+                    lastCandleRef.current = {
+                        ...lastCandleRef.current,
+                        close: currentPrice,
+                        high: Math.max(lastCandleRef.current.high, currentPrice),
+                        low: Math.min(lastCandleRef.current.low, currentPrice),
+                    };
+                }
+
+                chartManagerRef.current.updateLastCandle(lastCandleRef.current);
             }
-        };
-
-        // Run immediately on mount, then every 3 seconds
-        pollPrice();
-        const interval = setInterval(pollPrice, 3000);
-
-        return () => {
-            isMounted = false;
-            clearInterval(interval);
-        };
-    }, [ticker]);
+        }
+    }, [wsPrice, wsStatus, fallbackData]);
 
     // Update Trade Setup Lines
     useEffect(() => {
@@ -246,15 +274,21 @@ export const CustomChart: React.FC<CustomChartProps> = ({ ticker, tradeSetup, is
             {livePrice !== null && (
                 <div className="absolute top-4 right-4 z-20 flex items-center gap-2 bg-slate-950/80 p-1.5 px-3 rounded-lg border border-slate-800 backdrop-blur-md">
                     <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        {marketState === 'REGULAR' && (
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        )}
+                        <span className={`relative inline-flex rounded-full h-2 w-2 ${marketState === 'REGULAR' ? 'bg-emerald-500' :
+                            marketState === 'PRE' ? 'bg-amber-500' :
+                                (marketState === 'POST' || marketState === 'POSTPOST') ? 'bg-blue-500' :
+                                    'bg-slate-500'
+                            }`}></span>
                     </span>
                     <span className="text-xs font-mono font-bold text-white">${livePrice.toFixed(2)}</span>
                     {marketState && (
                         <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${marketState === 'REGULAR' ? 'bg-emerald-500/20 text-emerald-400' :
-                                marketState === 'PRE' ? 'bg-amber-500/20 text-amber-400' :
-                                    marketState === 'POST' || marketState === 'POSTPOST' ? 'bg-blue-500/20 text-blue-400' :
-                                        'bg-slate-500/20 text-slate-400'
+                            marketState === 'PRE' ? 'bg-amber-500/20 text-amber-400' :
+                                marketState === 'POST' || marketState === 'POSTPOST' ? 'bg-blue-500/20 text-blue-400' :
+                                    'bg-slate-500/20 text-slate-400'
                             }`}>
                             {marketState === 'REGULAR' ? 'LIVE' :
                                 marketState === 'PRE' ? 'PRE' :

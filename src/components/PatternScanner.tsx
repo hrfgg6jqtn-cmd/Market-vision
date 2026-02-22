@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import useSWR from 'swr';
 import { Radar, ArrowUpRight, ArrowDownRight, Target, RefreshCw, AlertTriangle } from "lucide-react";
 
 interface Alert {
@@ -26,8 +27,6 @@ interface PatternScannerProps {
 
 export const PatternScanner: React.FC<PatternScannerProps> = ({ onSelectAlert }) => {
     const [alerts, setAlerts] = useState<Alert[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
     const [minConfidence, setMinConfidence] = useState(30);
     const [minPrice, setMinPrice] = useState<string>("");
     const [maxPrice, setMaxPrice] = useState<string>("");
@@ -42,66 +41,48 @@ export const PatternScanner: React.FC<PatternScannerProps> = ({ onSelectAlert })
         );
     };
 
-    const fetchPatterns = async () => {
-        // Prevent scanning if no sources selected
-        if (sources.length === 0) {
-            // Keep existing alerts, just stop fetching
-            return;
+    const fetcher = async ([url, sourceList]: [string, string]) => {
+        const sourceArray = sourceList ? sourceList.split(',') : [];
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sources: sourceArray })
+        });
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `Scan failed: ${response.status}`);
         }
-
-        setIsLoading(true);
-        setError(null);
-        try {
-            const response = await fetch("/api/scan", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ sources })
-            });
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(errorData.error || `Scan failed: ${response.status} ${response.statusText}`);
-            }
-
-            const data = await response.json();
-            if (data.results) {
-                setAlerts(prev => {
-                    const now = Date.now();
-                    const expirationTime = 15 * 60 * 1000; // 15 Minutes
-
-                    // 1. Filter out expired alerts from previous state
-                    const validPrev = prev.filter(a => {
-                        return a.timestamp && (now - a.timestamp < expirationTime);
-                    });
-
-                    // 2. Create map for deduplication
-                    const alertMap = new Map(validPrev.map(a => [a.ticker, a]));
-
-                    // 3. Add/Update with new alerts
-                    data.results.forEach((newAlert: Alert) => {
-                        newAlert.timestamp = now; // Stamp with arrival time
-                        alertMap.set(newAlert.ticker, newAlert);
-                    });
-
-                    return Array.from(alertMap.values());
-                });
-            }
-        } catch (err) {
-            console.error(err);
-            console.error(err);
-            setError(err instanceof Error ? err.message : "Failed to scan market");
-        } finally {
-            setIsLoading(false);
-        }
+        return response.json();
     };
 
-    useEffect(() => {
-        // Initial Scan
-        fetchPatterns();
+    // SWR Engine: Handles caching, background polling, and revalidation on focus instantly
+    const { data, error: swrError, isValidating, mutate } = useSWR(
+        sources.length > 0 ? ['/api/scan', sources.join(',')] : null,
+        fetcher,
+        { refreshInterval: 60000, revalidateOnFocus: true }
+    );
 
-        // Auto-refresh every 60 seconds (real scanning is expensive/rate-limited)
-        const interval = setInterval(fetchPatterns, 60000);
-        return () => clearInterval(interval);
-    }, [sources]); // Refetch when sources change? Or user must click refresh? Let's refetch on change for better UX.
+    // Merge cached updates into the active alert list
+    useEffect(() => {
+        if (data?.results) {
+            setAlerts(prev => {
+                const now = Date.now();
+                const expirationTime = 15 * 60 * 1000; // 15 Minutes
+                const validPrev = prev.filter(a => a.timestamp && (now - a.timestamp < expirationTime));
+                const alertMap = new Map(validPrev.map(a => [a.ticker, a]));
+
+                data.results.forEach((newAlert: Alert) => {
+                    newAlert.timestamp = now;
+                    alertMap.set(newAlert.ticker, newAlert);
+                });
+
+                return Array.from(alertMap.values());
+            });
+        }
+    }, [data]);
+
+    const activeError = swrError?.message;
+    const isFetching = isValidating; // For the spinner UI
 
     const filteredAlerts = alerts.filter(a => {
         const meetsConfidence = a.confidence >= minConfidence;
@@ -116,18 +97,18 @@ export const PatternScanner: React.FC<PatternScannerProps> = ({ onSelectAlert })
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-                            <Radar className={`text-emerald-500 ${isLoading ? "animate-spin" : ""}`} />
+                            <Radar className={`text-emerald-500 ${isFetching ? "animate-spin" : ""}`} />
                             AI Pattern Scanner
                         </h2>
-                        {isLoading && <span className="text-xs text-slate-500 animate-pulse">Scanning...</span>}
+                        {isFetching && <span className="text-xs text-slate-500 animate-pulse">Scanning...</span>}
                     </div>
 
                     <button
-                        onClick={fetchPatterns}
+                        onClick={() => mutate()}
                         className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-400 hover:text-white"
                         title="Refresh Scan"
                     >
-                        <RefreshCw size={16} className={isLoading ? "animate-spin" : ""} />
+                        <RefreshCw size={16} className={isFetching ? "animate-spin" : ""} />
                     </button>
                 </div>
 
@@ -187,14 +168,14 @@ export const PatternScanner: React.FC<PatternScannerProps> = ({ onSelectAlert })
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
-                {error && (
+                {activeError && (
                     <div className="p-3 bg-red-950/30 border border-red-900/50 rounded-lg text-red-300 text-sm flex items-center gap-2">
                         <AlertTriangle size={16} />
-                        {error}
+                        {activeError}
                     </div>
                 )}
 
-                {!isLoading && filteredAlerts.length === 0 && !error && (
+                {!isFetching && filteredAlerts.length === 0 && !activeError && (
                     <div className="text-center text-slate-500 py-10">
                         <p>No patterns found above {minConfidence}% confidence.</p>
                         <p className="text-xs mt-2 opacity-60">Scanning top 60+ global assets...</p>

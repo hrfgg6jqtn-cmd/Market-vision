@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 const ALPACA_API_URL = process.env.ALPACA_API_URL || "https://paper-api.alpaca.markets"; // Default to paper for safety
+const ALPACA_DATA_URL = "https://data.alpaca.markets/v2"; // Market Data API
 
 export async function getAlpacaToken(userId: string): Promise<string | null> {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -79,4 +80,49 @@ export async function getAccount(userId: string) {
 
     if (!response.ok) throw new Error("Failed to fetch account");
     return response.json();
+}
+
+export async function getLatestQuote(userId: string, symbol: string) {
+    const token = await getAlpacaToken(userId);
+    // If no token, return null to let caller handle fallback
+    if (!token) return null;
+
+    try {
+        const response = await fetch(`${ALPACA_DATA_URL}/stocks/${symbol}/quotes/latest`, {
+            headers: { "Authorization": `Bearer ${token}` }
+        });
+
+        if (!response.ok) {
+            console.warn(`Alpaca quote fetch failed for ${symbol}: ${response.statusText}`);
+            return null;
+        }
+
+        const data = await response.json();
+        return data.quote; // { t: timestamp, ax: ask_price, ap: ask_price, bx: bid_exchange, bp: bid_price, bs: bid_size, ... }
+    } catch (error) {
+        console.error("Alpaca Quote Error:", error);
+        return null;
+    }
+}
+
+export async function getLatestBar(userId: string, symbol: string) {
+    const token = await getAlpacaToken(userId);
+    if (!token) return null;
+
+    try {
+        const response = await fetch(`${ALPACA_DATA_URL}/stocks/${symbol}/bars/latest`, {
+            headers: { "Authorization": `Bearer ${token}` }
+        });
+
+        if (!response.ok) {
+            console.warn(`Alpaca bar fetch failed for ${symbol}: ${response.statusText}`);
+            return null;
+        }
+
+        const data = await response.json();
+        return data.bar; // { t: timestamp, o: open, h: high, l: low, c: close, v: volume }
+    } catch (error) {
+        console.error("Alpaca Bar Error:", error);
+        return null;
+    }
 }
